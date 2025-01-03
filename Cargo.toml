@@ -35,7 +35,7 @@ default = []
 metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 
 [dependencies]
-axum = "0.7.9"
+axum = "0.8.1"
 metrics = { version = "0.24.1", default-features = false, optional = true }
 metrics-exporter-prometheus = { version = "0.16.0", default-features = false, optional = true }
 tokio = { version = "1.42.0", features = [
