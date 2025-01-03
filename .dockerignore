@@ -1,0 +1,8 @@
+/.cargo
+/.git
+/.vscode
+/target
+.gitignore
+Cargo.lock
+LICENSE-*
+*.md
