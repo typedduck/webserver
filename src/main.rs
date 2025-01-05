@@ -2,7 +2,7 @@
 
 use std::{
     net::{IpAddr, SocketAddr},
-    path::PathBuf,
+    path::Path,
     str::FromStr,
     sync::LazyLock,
 };
@@ -65,15 +65,14 @@ async fn main() {
 
 fn site_app() -> Router {
     let dir = std::env::var(&*SERVER_DIR).unwrap_or_else(|_| DEFAULT_DIR.into());
-    tracing::info!("serving '{}'", dir);
     let service = ServeDir::new(&dir).append_index_html_on_directories(true);
-    let mut file_404 = PathBuf::from(&dir);
-    let mut file_index = PathBuf::from(&dir);
-
-    file_index.push("index.html");
-    file_404.push(std::env::var(&*SERVER_404).unwrap_or_else(|_| DEFAULT_404.into()));
-    tracing::info!("serving 404 from '{}'", file_404.display());
+    let file_404 = std::env::var(&*SERVER_404).unwrap_or_else(|_| DEFAULT_404.into());
+    let file_404 = Path::new(&dir).join(file_404);
+    let file_index = Path::new(&dir).join("index.html");
     let service = service.fallback(ServeFile::new(&file_404));
+
+    tracing::info!("serving '{}'", dir);
+    tracing::info!("serving 404 from '{}'", file_404.display());
 
     #[cfg(feature = "metrics")]
     let app = Router::new()
