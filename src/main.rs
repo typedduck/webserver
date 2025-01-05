@@ -67,18 +67,23 @@ fn site_app() -> Router {
     let dir = std::env::var(&*SERVER_DIR).unwrap_or_else(|_| DEFAULT_DIR.into());
     tracing::info!("serving '{}'", dir);
     let service = ServeDir::new(&dir).append_index_html_on_directories(true);
-    let mut file_404 = PathBuf::from(dir);
+    let mut file_404 = PathBuf::from(&dir);
+    let mut file_index = PathBuf::from(&dir);
 
+    file_index.push("index.html");
     file_404.push(std::env::var(&*SERVER_404).unwrap_or_else(|_| DEFAULT_404.into()));
     tracing::info!("serving 404 from '{}'", file_404.display());
     let service = service.fallback(ServeFile::new(&file_404));
 
     #[cfg(feature = "metrics")]
     let app = Router::new()
-        .nest_service("/", service)
+        .route_service("/", ServeFile::new(&file_index))
+        .fallback_service(service)
         .route_layer(axum::middleware::from_fn(track_metrics));
     #[cfg(not(feature = "metrics"))]
-    let app = Router::new().nest_service("/", service);
+    let app = Router::new()
+        .route_service("/", ServeFile::new(&file_index))
+        .fallback_service(service);
 
     app
 }
