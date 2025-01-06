@@ -14,12 +14,12 @@ performance issues.
 The following environment variables are used:
 
 - `WEBSERVER_DIR`: The directory to serve, defaulting to "public"
-- `WEBSERVER_404`: The file to serve for 404 errors. the file must be located in
-    `WEBSERVER_DIR` and defaults to "404.html"
+- `WEBSERVER_404`: The file to serve for 404 errors. The file must be located in
+    `WEBSERVER_DIR` and the path is prepended. Defaults to "404.html"
 - `WEBSERVER_ADDR`: The address to listen on, defaulting to "0.0.0.0"
 - `WEBSERVER_PORT`: The port to listen on, defaulting to "8080"
-- `WEBSERVER_TIMEOUT`: The timeout for requests in seconds, defaulting to "0",
-    which means no timeout
+- `WEBSERVER_TIMEOUT`: The timeout for requests in milliseconds, defaulting to
+    "0", which means no timeout
 
 If compiled with the "metrics" feature, the following environment variables are
 used:
@@ -27,7 +27,7 @@ used:
 - `METRICS_ADDR`: The address to listen on for metrics, defaulting to "0.0.0.0"
 - `METRICS_PORT`: The port to listen on for metrics, defaulting to "8081"
 
-The path the metrics are served at is "/metrics". These should not be accessable
+The path the metrics are served at is "/metrics". This should not be accessable
 from the public internet. The metrics are compatible with Prometheus.
 
 The provided Dockerfile can be used to build the image. It defines a base image
