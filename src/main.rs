@@ -5,12 +5,14 @@ use std::{
     path::Path,
     str::FromStr,
     sync::LazyLock,
+    time::Duration,
 };
 
 use axum::Router;
 use tokio::{net::TcpListener, signal};
 use tower_http::{
     services::{ServeDir, ServeFile},
+    timeout::TimeoutLayer,
     trace::TraceLayer,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -24,12 +26,12 @@ static SERVER_ADDR: LazyLock<String> = LazyLock::new(|| format!("{}_ADDR", &*ENV
 static SERVER_PORT: LazyLock<String> = LazyLock::new(|| format!("{}_PORT", &*ENV_PREFIX));
 static SERVER_DIR: LazyLock<String> = LazyLock::new(|| format!("{}_DIR", &*ENV_PREFIX));
 static SERVER_404: LazyLock<String> = LazyLock::new(|| format!("{}_404", &*ENV_PREFIX));
+static SERVER_TIMEOUT: LazyLock<String> = LazyLock::new(|| format!("{}_TIMEOUT", &*ENV_PREFIX));
 
 const DEFAULT_DIR: &str = "public";
 const DEFAULT_404: &str = "404.html";
+const DEFAULT_TIMEOUT: &str = "0"; // no timeout
 
-#[cfg(feature = "metrics")]
-static SERVER_METRICS: LazyLock<String> = LazyLock::new(|| format!("{}_METRICS", &*ENV_PREFIX));
 #[cfg(feature = "metrics")]
 static METRICS_ADDR: LazyLock<String> = LazyLock::new(|| "METRICS_ADDR".to_string());
 #[cfg(feature = "metrics")]
@@ -47,23 +49,23 @@ async fn main() {
         .init();
 
     #[cfg(not(feature = "metrics"))]
-    start_site_server().await;
+    {
+        start_site_server().await;
+    }
 
     #[cfg(feature = "metrics")]
     {
-        let collect_metrics = std::env::var(&*SERVER_METRICS).unwrap_or_else(|_| "true".into());
-        match collect_metrics.to_lowercase().as_str() {
-            "true" | "1" => {
-                let (_site, _metrics) = tokio::join!(start_site_server(), start_metrics_server());
-            }
-            _ => {
-                start_site_server().await;
-            }
-        }
+        let (_site, _metrics) = tokio::join!(start_site_server(), start_metrics_server());
     }
 }
 
-fn site_app() -> Router {
+#[allow(clippy::cognitive_complexity)]
+fn site_app() -> Result<Router, Error> {
+    let timeout = std::env::var(&*SERVER_TIMEOUT)
+        .unwrap_or_else(|_| DEFAULT_TIMEOUT.into())
+        .parse::<u64>()
+        .map_err(Error::Timeout)?;
+    let timeout = Duration::from_millis(timeout);
     let dir = std::env::var(&*SERVER_DIR).unwrap_or_else(|_| DEFAULT_DIR.into());
     let service = ServeDir::new(&dir).append_index_html_on_directories(true);
     let file_404 = std::env::var(&*SERVER_404).unwrap_or_else(|_| DEFAULT_404.into());
@@ -73,6 +75,7 @@ fn site_app() -> Router {
 
     tracing::info!("serving '{}'", dir);
     tracing::info!("serving 404 from '{}'", file_404.display());
+    tracing::info!("serving index from '{}'", file_index.display());
 
     #[cfg(feature = "metrics")]
     let app = Router::new()
@@ -84,7 +87,12 @@ fn site_app() -> Router {
         .route_service("/", ServeFile::new(&file_index))
         .fallback_service(service);
 
-    app
+    if timeout > Duration::default() {
+        tracing::info!("timeout: {} ms", timeout.as_millis());
+        Ok(app.layer(TimeoutLayer::new(timeout)))
+    } else {
+        Ok(app)
+    }
 }
 
 async fn start_site_server() {
@@ -98,12 +106,14 @@ async fn serve_site() -> Result<(), Error> {
         IpAddr::from_str(&std::env::var(&*SERVER_ADDR).unwrap_or_else(|_| "0.0.0.0".into()))?;
     let port = std::env::var(&*SERVER_PORT)
         .unwrap_or_else(|_| "8080".into())
-        .parse::<u16>()?;
+        .parse::<u16>()
+        .map_err(Error::Port)?;
     let addr = SocketAddr::from((addr, port));
     let listener = TcpListener::bind(addr).await?;
+    let app = site_app()?.layer(TraceLayer::new_for_http());
 
     tracing::info!("site listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, site_app().layer(TraceLayer::new_for_http()))
+    axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
@@ -146,7 +156,8 @@ async fn serve_metrics() -> Result<(), Error> {
         IpAddr::from_str(&std::env::var(&*METRICS_ADDR).unwrap_or_else(|_| "0.0.0.0".into()))?;
     let port = std::env::var(&*METRICS_PORT)
         .unwrap_or_else(|_| "8081".into())
-        .parse::<u16>()?;
+        .parse::<u16>()
+        .map_err(Error::Port)?;
     let addr = SocketAddr::from((addr, port));
     let listener = TcpListener::bind(addr).await?;
 
@@ -215,20 +226,15 @@ async fn shutdown_signal() {
 
 #[derive(Debug)]
 enum Error {
+    Io(std::io::Error),
     IpAddr(std::net::AddrParseError),
     Port(std::num::ParseIntError),
-    Io(std::io::Error),
+    Timeout(std::num::ParseIntError),
 }
 
 impl From<std::net::AddrParseError> for Error {
     fn from(e: std::net::AddrParseError) -> Self {
         Self::IpAddr(e)
-    }
-}
-
-impl From<std::num::ParseIntError> for Error {
-    fn from(e: std::num::ParseIntError) -> Self {
-        Self::Port(e)
     }
 }
 
@@ -241,9 +247,10 @@ impl From<std::io::Error> for Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::IpAddr(e) => e.fmt(f),
-            Self::Port(_) => write!(f, "port must be an integer between 1 and 65535"),
             Self::Io(e) => e.fmt(f),
+            Self::IpAddr(e) => e.fmt(f),
+            Self::Port(_) => write!(f, "port must be a positive integer (u16)"),
+            Self::Timeout(_) => write!(f, "timeout must be a positive integer (u64)"),
         }
     }
 }
@@ -251,9 +258,9 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::IpAddr(e) => Some(e),
-            Self::Port(e) => Some(e),
             Self::Io(e) => Some(e),
+            Self::IpAddr(e) => Some(e),
+            Self::Port(e) | Self::Timeout(e) => Some(e),
         }
     }
 }
