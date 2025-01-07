@@ -1,5 +1,5 @@
 # Change Log
 
-## [0.1.0](https://github.com/typedduck/server/tree/server-v0.1.0) - 2024-12-31
+## [0.1.0](https://github.com/typedduck/webserver/tree/webserver-v0.1.0) - 2025-01-07
 
 - Initial release
