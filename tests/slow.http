@@ -1,3 +1,0 @@
-@baseurl = http://localhost:8080
-
-GET {{baseurl}}/slow HTTP/1.1
