@@ -1,6 +1,6 @@
 ARG IMAGE=scratch
 
-FROM rust:1.84 AS builder
+FROM rust:1.85 AS builder
 ARG FEATURES=default
 ARG TARGET=x86_64-unknown-linux-musl
 WORKDIR /usr/src/app
