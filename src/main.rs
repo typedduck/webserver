@@ -15,7 +15,6 @@ use tower_http::{
     timeout::TimeoutLayer,
     trace::TraceLayer,
 };
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[cfg(feature = "metrics")]
 use axum::{extract::Request, middleware::Next, response::IntoResponse};
@@ -39,13 +38,16 @@ static METRICS_PORT: LazyLock<String> = LazyLock::new(|| "METRICS_PORT".to_strin
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_env(&*SERVER_LOG).unwrap_or_else(|_| {
-                format!("{}=warn,tower_http=warn", env!("CARGO_CRATE_NAME")).into()
-            }),
-        )
-        .with(tracing_subscriber::fmt::layer())
+    let level = tracing::Level::from_str(
+        std::env::var(&*SERVER_LOG)
+            .unwrap_or_else(|_| "warn".into())
+            .as_str(),
+    )
+    .unwrap_or(tracing::Level::WARN);
+
+    tracing_subscriber::fmt()
+        .with_max_level(level)
+        .with_target(false)
         .init();
 
     #[cfg(not(feature = "metrics"))]
@@ -71,28 +73,24 @@ fn site_app() -> Result<Router, Error> {
     let file_404 = std::env::var(&*SERVER_404).unwrap_or_else(|_| DEFAULT_404.into());
     let file_404 = Path::new(&dir).join(file_404);
     let file_index = Path::new(&dir).join("index.html");
-    let service = service.fallback(ServeFile::new(&file_404));
+    let service = service.not_found_service(ServeFile::new(&file_404));
 
     tracing::info!("serving '{}'", dir);
     tracing::info!("serving 404 from '{}'", file_404.display());
     tracing::info!("serving index from '{}'", file_index.display());
 
+    let app = Router::new().route_service("/", ServeFile::new(&file_index));
     #[cfg(feature = "metrics")]
-    let app = Router::new()
-        .route_service("/", ServeFile::new(&file_index))
-        .fallback_service(service)
-        .route_layer(axum::middleware::from_fn(track_metrics));
-    #[cfg(not(feature = "metrics"))]
-    let app = Router::new()
-        .route_service("/", ServeFile::new(&file_index))
-        .fallback_service(service);
-
-    if timeout > Duration::default() {
+    let app = app.route_layer(axum::middleware::from_fn(track_metrics));
+    let app = app.fallback_service(service);
+    let app = if timeout > Duration::default() {
         tracing::info!("timeout: {} ms", timeout.as_millis());
-        Ok(app.layer(TimeoutLayer::new(timeout)))
+        app.layer(TimeoutLayer::new(timeout))
     } else {
-        Ok(app)
-    }
+        app
+    };
+
+    Ok(app)
 }
 
 async fn start_site_server() {

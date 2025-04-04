@@ -1,6 +1,6 @@
 [package]
 name = "webserver"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["TypedDuck <typedduck@posteo.net>"]
@@ -35,10 +35,10 @@ default = []
 metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 
 [dependencies]
-axum = "0.8.1"
+axum = "0.8.3"
 metrics = { version = "0.24.1", default-features = false, optional = true }
 metrics-exporter-prometheus = { version = "0.16.2", default-features = false, optional = true }
-tokio = { version = "1.43.0", features = [
+tokio = { version = "1.44.0", features = [
     "rt-multi-thread",
     "macros",
     "signal",
